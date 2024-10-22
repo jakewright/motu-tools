@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const (
@@ -66,17 +67,8 @@ var devices = map[string]*Device{
 }
 
 const (
-	deviceMain   = "main"
-	devicePhones = "phones"
-
-	motuPropertyPhonesTrim = "datastore/ext/obank/0/ch/0/stereoTrim"
-	motuPropertyMainTrim   = "datastore/ext/obank/1/ch/0/stereoTrim"
-	//motuPropertyFaderMain  = "datastore/mix/main/0/matrix/fader"
-
-	phonesTrimMin = "-127"
-	phonesTrimMax = "-20"
-	mainTrimMin   = "-127"
-	mainTrimMax   = "-20"
+// motuPropertyPhonesTrim = "datastore/ext/obank/0/ch/0/stereoTrim""
+// motuPropertyFaderMain  = "datastore/mix/main/0/matrix/fader"
 )
 
 func main() {
@@ -129,15 +121,11 @@ func NewFromIPAddress(ip string) (*MotuClient, error) {
 
 	return &MotuClient{
 		MOTUAddress: addr,
-		HTTPClient:  http.DefaultClient,
+		HTTPClient: &http.Client{
+			Timeout: time.Second * 3,
+		},
 	}, nil
 }
-
-//func (m *MotuClient) Mute() error {
-//	if err := m.patch(motuPropertyFaderMain, 0); err != nil {
-//
-//	}
-//}
 
 func (m *MotuClient) Mute(d *Device) error {
 	current, err := m.get(d.MuteProperty)
@@ -252,6 +240,17 @@ func (m *MotuClient) get(property string) (float64, error) {
 		return 0, fmt.Errorf("failed to read body: %w", err)
 	}
 
+	// The default HTTP client's Transport may not
+	// reuse HTTP/1.x "keep-alive" TCP connections if the
+	// Body is not read to completion and closed.
+	// See: https://golang.org/pkg/net/http/#Response
+	defer func() {
+		if rsp.Body != nil {
+			_, _ = io.Copy(io.Discard, rsp.Body)
+			_ = rsp.Body.Close()
+		}
+	}()
+
 	type wrapper struct {
 		Value float64 `json:"value"`
 	}
@@ -286,12 +285,26 @@ func (m *MotuClient) patch(property string, value float64) error {
 		return fmt.Errorf("failed to make request: %w", err)
 	}
 
-	defer rsp.Body.Close()
+	// The default HTTP client's Transport may not
+	// reuse HTTP/1.x "keep-alive" TCP connections if the
+	// Body is not read to completion and closed.
+	// See: https://golang.org/pkg/net/http/#Response
+	defer func() {
+		if rsp.Body != nil {
+			_, _ = io.Copy(io.Discard, rsp.Body)
+			_ = rsp.Body.Close()
+		}
+	}()
+
 	return nil
 }
 
 func playSound() error {
-	if err := exec.Command("afplay", volumeSound).Run(); err != nil {
+	// Apple does not define a value range for this, but it appears to accept
+	// 0=silent, 1=normal (default) and then up to 255=Very loud.
+	// Setting to higher than default so it's easier to hear over other audio.
+	volume := "2"
+	if err := exec.Command("afplay", "-v", volume, volumeSound).Run(); err != nil {
 		return fmt.Errorf("failed to run afplay: %w", err)
 	}
 
