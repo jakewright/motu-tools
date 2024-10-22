@@ -21,6 +21,7 @@ const (
 
 	// The type of scale used by the property
 	scaleLinear = "linear"
+	scaleLog    = "log"
 
 	volumeSound = "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff"
 )
@@ -35,11 +36,13 @@ type Device struct {
 	// Type of scale (linear or logarithmic)
 	Scale string
 
-	// Allowed range of values
+	// Allowed range of values.
+	// If scale is log, these are values in dB (as displayed in the MOTU UI).
 	Max float64
 	Min float64
 
-	// Once Min is reached, we skip straight to zero volume
+	// Once Min is reached, we skip straight to zero volume.
+	// If scale is log, this is NOT dB but instead the amplitude ratio value
 	ZeroVolume float64
 }
 
@@ -51,6 +54,14 @@ var devices = map[string]*Device{
 		Max:          0,
 		Min:          -50,
 		ZeroVolume:   -127,
+	},
+	"computer": {
+		Property:     "datastore/mix/chan/10/matrix/fader",
+		MuteProperty: "datastore/mix/chan/10/matrix/mute",
+		Scale:        scaleLog,
+		Max:          0,
+		Min:          -64,
+		ZeroVolume:   0,
 	},
 }
 
@@ -160,6 +171,8 @@ func (m *MotuClient) IncDec(d *Device, inc bool) error {
 	switch d.Scale {
 	case scaleLinear:
 		newValue = m.newVolumeLinear(d, current, inc)
+	case scaleLog:
+		newValue = m.newVolumeLog(d, current, inc)
 	default:
 		panic("unknown scale")
 	}
@@ -193,6 +206,37 @@ func (m *MotuClient) newVolumeLinear(d *Device, current float64, inc bool) float
 
 	// Keep the volume within the bounds
 	return math.Min(math.Max(newVolume, d.Min), d.Max)
+}
+
+func (m *MotuClient) newVolumeLog(d *Device, current float64, inc bool) float64 {
+	// Convert the amplitude ratio value to a decibel value
+	// https://en.wikipedia.org/wiki/Decibel
+	currentDB := 10 * math.Log10(math.Pow(current, 2))
+
+	delta := (d.Max - d.Min) / volumeDenominations
+
+	var newDB float64
+	if inc {
+		newDB = math.Ceil(currentDB) + delta
+	} else {
+		newDB = math.Ceil(currentDB) - delta
+	}
+
+	// Go straight to mute once we reach min volume to avoid the
+	// range of volumes being skewed towards the barely-audible range
+	if !inc && newDB <= d.Min {
+		if d.ZeroVolume != 0 {
+			panic("logarithmic zero volume should be zero")
+		}
+		return d.ZeroVolume
+	}
+
+	// Keep the volume within the bounds
+	newDB = math.Min(math.Max(newDB, d.Min), d.Max)
+
+	// Convert back to amplitude ratio and bound to [0, 1]
+	newAmpRatio := math.Sqrt(math.Pow(10, newDB/10))
+	return math.Min(math.Max(newAmpRatio, 0), 1)
 }
 
 func (m *MotuClient) get(property string) (float64, error) {
