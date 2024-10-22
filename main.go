@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -20,6 +21,8 @@ const (
 
 	// The type of scale used by the property
 	scaleLinear = "linear"
+
+	volumeSound = "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff"
 )
 
 type Device struct {
@@ -165,6 +168,10 @@ func (m *MotuClient) IncDec(d *Device, inc bool) error {
 		return fmt.Errorf("failed to update property: %w", err)
 	}
 
+	if err := playSound(); err != nil {
+		return fmt.Errorf("failed to play sound: %w", err)
+	}
+
 	return nil
 }
 
@@ -236,5 +243,13 @@ func (m *MotuClient) patch(property string, value float64) error {
 	}
 
 	defer rsp.Body.Close()
+	return nil
+}
+
+func playSound() error {
+	if err := exec.Command("afplay", volumeSound).Run(); err != nil {
+		return fmt.Errorf("failed to run afplay: %w", err)
+	}
+
 	return nil
 }
