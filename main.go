@@ -15,7 +15,7 @@ import (
 
 const (
 	// Network address of the Motu interface
-	motuAddress = "192.168.88.251"
+	motuAddress = "192.168.88.50"
 
 	// How many steps between min and max
 	volumeDenominations = 16
@@ -25,6 +25,7 @@ const (
 	scaleLog    = "log"
 
 	volumeSound = "/System/Library/LoginPlugins/BezelServices.loginPlugin/Contents/Resources/volume.aiff"
+	errorSound = "/System/Library/Sounds/Tink.aiff"
 )
 
 type Device struct {
@@ -104,6 +105,11 @@ func main() {
 
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
+
+		if err := playError(); err != nil {
+			fmt.Printf("Failed to play error sound: %v\n", err)
+		}
+
 		os.Exit(1)
 	}
 }
@@ -144,6 +150,12 @@ func (m *MotuClient) Mute(d *Device) error {
 
 	if err := m.patch(d.MuteProperty, newValue); err != nil {
 		return fmt.Errorf("failed to update property: %w", err)
+	}
+
+	if newValue == 0 {
+		if err := playSound(); err != nil {
+			return fmt.Errorf("failed to play sound: %w", err)
+		}
 	}
 
 	return nil
@@ -305,6 +317,14 @@ func playSound() error {
 	// Setting to higher than default so it's easier to hear over other audio.
 	volume := "2"
 	if err := exec.Command("afplay", "-v", volume, volumeSound).Run(); err != nil {
+		return fmt.Errorf("failed to run afplay: %w", err)
+	}
+
+	return nil
+}
+
+func playError() error {
+	if err := exec.Command("afplay", errorSound).Run(); err != nil {
 		return fmt.Errorf("failed to run afplay: %w", err)
 	}
 
